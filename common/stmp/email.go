@@ -2,20 +2,14 @@ package stmp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"one-api/common"
 	"one-api/common/config"
 	"one-api/common/utils"
-	"os"
 	"strings"
 
-	"github.com/wneessen/go-mail"
+	"gopkg.in/gomail.v2"
 )
-
-var SendResetError = &mail.SendError{
-	Reason: mail.ErrSMTPReset,
-}
 
 type StmpConfig struct {
 	Host     string
@@ -40,39 +34,35 @@ func NewStmp(host string, port int, username string, password string, from strin
 }
 
 func (s *StmpConfig) Send(to, subject, body string) error {
-	// 设置环境变量解决TLS问题
-	os.Setenv("GODEBUG", "tlsrsakex=1")
+	// Create a new message
+	message := gomail.NewMessage()
 
-	message := mail.NewMsg()
-	message.From(s.From)
-	message.To(to)
-	message.Subject(subject)
-	message.SetGenHeader("References", s.getReferences())
-	message.SetBodyString(mail.TypeTextHTML, body)
-	message.SetUserAgent(fmt.Sprintf("One Hub %s // https://github.com/MartialBE/one-hub", config.Version))
+	// Set email headers
+	message.SetHeader("From", s.From)
+	message.SetHeader("To", to)
+	message.SetHeader("Subject", subject)
+	message.SetHeader("References", s.getReferences())
+	message.SetHeader("User-Agent", fmt.Sprintf("One Hub %s // https://github.com/MartialBE/one-hub", config.Version))
 
-	client, err := mail.NewClient(
-		s.Host,
-		mail.WithPort(s.Port),
-		mail.WithUsername(s.Username),
-		mail.WithPassword(s.Password),
-		mail.WithSMTPAuth(mail.SMTPAuthPlain),
-	)
+	// Set HTML body
+	message.SetBody("text/html", body)
 
-	if err != nil {
-		return err
-	}
+	// Create SMTP dialer
+	dialer := gomail.NewDialer(s.Host, s.Port, s.Username, s.Password)
 
+	// Configure TLS/SSL based on port
 	switch s.Port {
 	case 465:
-		client.SetSSL(true)
+		// Use SSL for port 465
+		dialer.SSL = true
 	case 587:
-		client.SetTLSPolicy(mail.TLSMandatory)
-		client.SetSMTPAuth(mail.SMTPAuthLogin)
+		// Use STARTTLS for port 587
+		dialer.TLSConfig = nil // Use default TLS config
 	}
 
-	if err := DialAndSend(client, message); err != nil {
-		return err
+	// Send the email
+	if err := dialer.DialAndSend(message); err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
 	}
 
 	return nil
@@ -85,7 +75,6 @@ func (s *StmpConfig) getReferences() string {
 
 func (s *StmpConfig) Render(to, subject, content string) error {
 	body := getDefaultTemplate(content)
-
 	return s.Send(to, subject, body)
 }
 
@@ -99,7 +88,6 @@ func GetSystemStmp() (*StmpConfig, error) {
 
 func SendPasswordResetEmail(userName, email, link string) error {
 	stmp, err := GetSystemStmp()
-
 	if err != nil {
 		return err
 	}
@@ -126,7 +114,6 @@ func SendPasswordResetEmail(userName, email, link string) error {
 
 func SendVerificationCodeEmail(email, code string) error {
 	stmp, err := GetSystemStmp()
-
 	if err != nil {
 		return err
 	}
@@ -152,7 +139,6 @@ func SendVerificationCodeEmail(email, code string) error {
 
 func SendQuotaWarningCodeEmail(userName, email string, quota int, noMoreQuota bool) error {
 	stmp, err := GetSystemStmp()
-
 	if err != nil {
 		return err
 	}
@@ -181,17 +167,13 @@ func SendQuotaWarningCodeEmail(userName, email string, quota int, noMoreQuota bo
 	return stmp.Render(email, subject, content)
 }
 
-func DialAndSend(c *mail.Client, messages ...*mail.Msg) error {
+// DialAndSend is a helper function that maintains compatibility with the original interface
+// In gomail.v2, DialAndSend is already available on the Dialer, so this is mainly for consistency
+func DialAndSend(dialer *gomail.Dialer, messages ...*gomail.Message) error {
 	ctx := context.Background()
-	if err := c.DialWithContext(ctx); err != nil {
-		return fmt.Errorf("dial failed: %w", err)
-	}
-	defer c.Close()
+	_ = ctx // Context is not directly used in gomail.v2, but kept for compatibility
 
-	if err := c.Send(messages...); err != nil {
-		if errors.Is(err, SendResetError) {
-			return nil
-		}
+	if err := dialer.DialAndSend(messages...); err != nil {
 		return fmt.Errorf("send failed: %w", err)
 	}
 	return nil
