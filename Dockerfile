@@ -9,7 +9,8 @@ RUN yarn --frozen-lockfile
 
 COPY ./web .
 COPY ./VERSION .
-RUN DISABLE_ESLINT_PLUGIN='true' VITE_APP_VERSION=$(cat VERSION) npm run build
+# RUN DISABLE_ESLINT_PLUGIN='true' VITE_APP_VERSION=$(cat VERSION) npm run build
+RUN DISABLE_ESLINT_PLUGIN='true' VITE_APP_VERSION=$(cat VERSION) NODE_OPTIONS="--max-old-space-size=2048" npm run build
 
 FROM golang:1.24.2 AS builder2
 
